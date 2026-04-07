@@ -23,6 +23,7 @@ from scapy.layers.inet6 import IPv6, ICMPv6ND_NS
 from scapy.layers.inet6 import IPv6ExtHdrFragment, IPv6ExtHdrHopByHop, RouterAlert
 
 import cocotb_test.simulator
+import pytest
 
 import cocotb
 from cocotb.clock import Clock
@@ -251,7 +252,8 @@ def process_f_files(files):
     return list(lst.values())
 
 
-def test_zircon_ip_len_cksum(request, data_w=32):
+@pytest.mark.parametrize("data_w", [32, 64, 128, 256, 512])
+def test_zircon_ip_len_cksum(request, data_w):
     dut = "zircon_ip_len_cksum"
     module = os.path.splitext(os.path.basename(__file__))[0]
     toplevel = module
