@@ -245,6 +245,7 @@ Example designs are provided for several different FPGA boards, showcasing many 
 *  Xilinx Alveo U250 (Xilinx Virtex UltraScale+ XCU250)
 *  Xilinx Alveo U280 (Xilinx Virtex UltraScale+ XCU280)
 *  Xilinx Alveo X3/X3522 (Xilinx Virtex UltraScale+ XCUX35)
+*  Xilinx AC701 (Xilinx Artix 7 XC7A200T)
 *  Xilinx KC705 (Xilinx Kintex 7 XC7K325T)
 *  Xilinx KCU105 (Xilinx Kintex UltraScale XCKU040)
 *  Xilinx Kria KR260 (Xilinx Kria K26 SoM / Zynq UltraScale+ XCK26)
