@@ -42,8 +42,8 @@ module fpga #
     /*
      * UART
      */
-    output wire logic                 uart_txd[UART_CNT],
-    input  wire logic                 uart_rxd[UART_CNT],
+    output wire logic                 uart_txd,
+    input  wire logic                 uart_rxd,
 
     /*
      * Ethernet: QSFP28
@@ -193,6 +193,12 @@ assign eth_gty_mgt_refclk_n[0] = dsfp_mgt_refclk_n;
 
 assign clk_161mhz_ref_int = eth_gty_mgt_refclk_out[0];
 
+wire uart_rxd_int[1];
+wire uart_txd_int[1];
+
+assign uart_txd = uart_txd_int[0];
+assign uart_rxd_int[0] = uart_rxd;
+
 fpga_core #(
     .SIM(SIM),
     .VENDOR(VENDOR),
@@ -230,8 +236,8 @@ core_inst (
     /*
      * UART
      */
-    .uart_txd(uart_txd),
-    .uart_rxd(uart_rxd),
+    .uart_txd(uart_txd_int),
+    .uart_rxd(uart_rxd_int),
 
     /*
      * Ethernet
