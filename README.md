@@ -115,6 +115,7 @@ The Taxi transport library contains many smaller components that can be composed
     *  Demultiplexer
     *  Broadcaster
     *  Concatenator
+    *  Pading inserter
     *  Switch
     *  COBS encoder
     *  COBS decoder
