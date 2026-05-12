@@ -47,7 +47,7 @@ module taxi_axis_xgmii_rx_32 #
     /*
      * Configuration
      */
-    input  wire logic [15:0]          cfg_rx_max_pkt_len = 16'd1518,
+    input  wire logic [15:0]          cfg_rx_max_pkt_len = 16'd1518-1,
     input  wire logic                 cfg_rx_enable,
 
     /*
@@ -300,8 +300,14 @@ always_comb begin
             frame_len_lim_cyc_next = '0;
         end
 
-        if (frame_len_lim_cyc_reg == 2) begin
-            frame_len_lim_check_next = 1'b1;
+        if (frame_len_lim_last_reg == 0) begin
+            if (frame_len_lim_cyc_reg == 1) begin
+                frame_len_lim_check_next = 1'b1;
+            end
+        end else begin
+            if (frame_len_lim_cyc_reg == 2) begin
+                frame_len_lim_check_next = 1'b1;
+            end
         end
 
         // address and ethertype checks
@@ -326,7 +332,8 @@ always_comb begin
                 // idle state - wait for packet
                 frame_oversize_next = 1'b0;
                 frame_len_next = 16'(CTRL_W);
-                {frame_len_lim_cyc_next, frame_len_lim_last_next} = cfg_rx_max_pkt_len;
+                frame_len_lim_cyc_next = cfg_rx_max_pkt_len[15:2];
+                frame_len_lim_last_next = cfg_rx_max_pkt_len[1:0] + 1;
                 frame_len_lim_check_next = 1'b0;
                 hdr_ptr_next = 0;
 

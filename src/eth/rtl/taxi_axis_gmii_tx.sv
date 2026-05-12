@@ -55,7 +55,7 @@ module taxi_axis_gmii_tx #
     /*
      * Configuration
      */
-    input  wire logic [15:0]          cfg_tx_max_pkt_len = 16'd1518,
+    input  wire logic [15:0]          cfg_tx_max_pkt_len = 16'd1518-1,
     input  wire logic [7:0]           cfg_tx_ifg = 8'd12,
     input  wire logic                 cfg_tx_enable,
 
@@ -413,7 +413,8 @@ always_comb begin
 
                 if (!s_axis_tx.tvalid || s_axis_tx.tlast || frame_len_lim_reg < 6) begin
                     s_axis_tx_tready_next = frame_next; // drop frame
-                    frame_error_next = !s_axis_tx.tvalid || s_axis_tx.tuser[0] || frame_len_lim_reg < 6;
+                    stat_tx_err_oversize_next = !s_axis_tx.tlast && frame_len_lim_reg < 6;
+                    frame_error_next = !s_axis_tx.tvalid || s_axis_tx.tuser[0] || stat_tx_err_oversize_next;
                     stat_tx_err_user_next = s_axis_tx.tuser[0];
                     stat_tx_err_underflow_next = !s_axis_tx.tvalid;
 
@@ -494,7 +495,6 @@ always_comb begin
                     stat_tx_pkt_mcast_next = is_mcast_reg && !is_bcast_reg;
                     stat_tx_pkt_bcast_next = is_bcast_reg;
                     stat_tx_pkt_vlan_next = is_8021q_reg;
-                    stat_tx_err_oversize_next = frame_len_lim_reg == 0;
                     state_next = STATE_IFG;
                 end
             end

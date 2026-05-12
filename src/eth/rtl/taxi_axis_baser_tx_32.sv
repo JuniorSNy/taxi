@@ -57,7 +57,7 @@ module taxi_axis_baser_tx_32 #
     /*
      * Configuration
      */
-    input  wire logic [15:0]          cfg_tx_max_pkt_len = 16'd1518,
+    input  wire logic [15:0]          cfg_tx_max_pkt_len = 16'd1518-1,
     input  wire logic [7:0]           cfg_tx_ifg = 8'd12,
     input  wire logic                 cfg_tx_enable,
 
@@ -471,7 +471,7 @@ always_comb begin
                 frame_min_count_next = MIN_LEN_W'(MIN_FRAME_LEN-4);
                 hdr_ptr_next = 0;
                 frame_len_next = 0;
-                {frame_len_lim_cyc_next, frame_len_lim_last_next} = cfg_tx_max_pkt_len-1;
+                {frame_len_lim_cyc_next, frame_len_lim_last_next} = cfg_tx_max_pkt_len;
                 frame_len_lim_check_next = 1'b0;
                 reset_crc = 1'b1;
 

@@ -93,7 +93,7 @@ async def run_test(dut, payload_lengths=None, payload_data=None, ifg=12):
     tb = TB(dut)
 
     tb.source.ifg = ifg
-    tb.dut.cfg_rx_max_pkt_len.value = 9218
+    tb.dut.cfg_rx_max_pkt_len.value = 9218-1
     tb.dut.cfg_rx_enable.value = 1
 
     await tb.reset()
@@ -159,7 +159,7 @@ async def run_test_oversize(dut, ifg=12):
     tb = TB(dut)
 
     tb.source.ifg = ifg
-    tb.dut.cfg_rx_max_pkt_len.value = 1518
+    tb.dut.cfg_rx_max_pkt_len.value = 1518-1
     tb.dut.cfg_rx_enable.value = 1
 
     await tb.reset()
@@ -179,7 +179,7 @@ async def run_test_oversize(dut, ifg=12):
 
             tb.log.info("max len %d (without FCS), test len %d (without FCS)", max_len, test_pkt_len)
 
-            tb.dut.cfg_rx_max_pkt_len.value = max_len+4
+            tb.dut.cfg_rx_max_pkt_len.value = max_len+4-1
 
             test_data_1 = bytes(x for x in range(60))
             test_data_2 = bytes(x for x in range(test_pkt_len))

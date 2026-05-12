@@ -58,7 +58,7 @@ module taxi_axis_baser_tx_64 #
     /*
      * Configuration
      */
-    input  wire logic [15:0]          cfg_tx_max_pkt_len = 16'd1518,
+    input  wire logic [15:0]          cfg_tx_max_pkt_len = 16'd1518-1,
     input  wire logic [7:0]           cfg_tx_ifg = 8'd12,
     input  wire logic                 cfg_tx_enable,
 
@@ -466,8 +466,14 @@ always_comb begin
             frame_len_lim_cyc_next = '0;
         end
 
-        if (frame_len_lim_cyc_reg == 2) begin
-            frame_len_lim_check_next = 1'b1;
+        if (frame_len_lim_last_reg[2]) begin
+            if (frame_len_lim_cyc_reg == 3) begin
+                frame_len_lim_check_next = 1'b1;
+            end
+        end else begin
+            if (frame_len_lim_cyc_reg == 2) begin
+                frame_len_lim_check_next = 1'b1;
+            end
         end
 
         // address and ethertype checks
@@ -500,7 +506,7 @@ always_comb begin
                 frame_min_count_next = MIN_LEN_W'(MIN_FRAME_LEN-4-KEEP_W);
                 hdr_ptr_next = 0;
                 frame_len_next = 0;
-                {frame_len_lim_cyc_next, frame_len_lim_last_next} = cfg_tx_max_pkt_len-5;
+                {frame_len_lim_cyc_next, frame_len_lim_last_next} = cfg_tx_max_pkt_len ^ 4;
                 frame_len_lim_check_next = 1'b0;
                 reset_crc = 1'b1;
                 s_axis_tx_tready_next = cfg_tx_enable;

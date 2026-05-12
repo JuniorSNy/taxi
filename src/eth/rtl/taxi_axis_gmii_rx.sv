@@ -51,7 +51,7 @@ module taxi_axis_gmii_rx #
     /*
      * Configuration
      */
-    input  wire logic [15:0]          cfg_rx_max_pkt_len = 16'd1518,
+    input  wire logic [15:0]          cfg_rx_max_pkt_len = 16'd1518-1,
     input  wire logic                 cfg_rx_enable,
 
     /*
@@ -134,6 +134,7 @@ logic is_bcast_reg = 1'b0, is_bcast_next;
 logic is_8021q_reg = 1'b0, is_8021q_next;
 logic [15:0] frame_len_reg = '0, frame_len_next;
 logic [15:0] frame_len_lim_reg = '0, frame_len_lim_next;
+logic frame_len_lim_check_reg = '0, frame_len_lim_check_next;
 
 logic [DATA_W-1:0] m_axis_rx_tdata_reg = '0, m_axis_rx_tdata_next;
 logic m_axis_rx_tvalid_reg = 1'b0, m_axis_rx_tvalid_next;
@@ -228,6 +229,7 @@ always_comb begin
     is_8021q_next = is_8021q_reg;
     frame_len_next = frame_len_reg;
     frame_len_lim_next = frame_len_lim_reg;
+    frame_len_lim_check_next = frame_len_lim_check_reg;
 
     m_axis_rx_tdata_next = '0;
     m_axis_rx_tvalid_next = 1'b0;
@@ -266,6 +268,8 @@ always_comb begin
         // counter for max frame length enforcement
         if (frame_len_lim_reg != 0) begin
             frame_len_lim_next = frame_len_lim_reg - 1;
+        end else begin
+            frame_len_lim_check_next = 1'b1;
         end
 
         // address and ethertype checks
@@ -297,6 +301,7 @@ always_comb begin
                 frame_error_next = 1'b0;
                 frame_len_next = 1;
                 frame_len_lim_next = cfg_rx_max_pkt_len;
+                frame_len_lim_check_next = 1'b0;
                 hdr_ptr_next = 0;
                 is_mcast_next = 1'b0;
                 is_bcast_next = 1'b0;
@@ -372,18 +377,18 @@ always_comb begin
                     stat_rx_pkt_mcast_next = is_mcast_reg && !is_bcast_reg;
                     stat_rx_pkt_bcast_next = is_bcast_reg;
                     stat_rx_pkt_vlan_next = is_8021q_reg;
-                    stat_rx_err_oversize_next = frame_len_lim_reg == 0;
+                    stat_rx_err_oversize_next = frame_len_lim_check_reg;
                     stat_rx_err_framing_next = !gmii_rx_dv_d0_reg;
                     stat_rx_err_preamble_next = !pre_ok_reg;
                     if (frame_error_next) begin
                         // error
                         m_axis_rx_tuser_next = 1'b1;
                         stat_rx_pkt_fragment_next = frame_len_reg[15:6] == 0;
-                        stat_rx_pkt_jabber_next = frame_len_lim_reg == 0;
+                        stat_rx_pkt_jabber_next = frame_len_lim_check_reg;
                         stat_rx_pkt_bad_next = 1'b1;
                     end else if (crc_valid) begin
                         // FCS good
-                        if (frame_len_lim_reg == 0) begin
+                        if (frame_len_lim_check_reg) begin
                             // too long
                             m_axis_rx_tuser_next = 1'b1;
                             stat_rx_pkt_bad_next = 1'b1;
@@ -396,7 +401,7 @@ always_comb begin
                         // FCS bad
                         m_axis_rx_tuser_next = 1'b1;
                         stat_rx_pkt_fragment_next = frame_len_reg[15:6] == 0;
-                        stat_rx_pkt_jabber_next = frame_len_lim_reg == 0;
+                        stat_rx_pkt_jabber_next = frame_len_lim_check_reg;
                         stat_rx_pkt_bad_next = 1'b1;
                         stat_rx_err_bad_fcs_next = 1'b1;
                     end
@@ -426,6 +431,7 @@ always_ff @(posedge clk) begin
     is_8021q_reg <= is_8021q_next;
     frame_len_reg <= frame_len_next;
     frame_len_lim_reg <= frame_len_lim_next;
+    frame_len_lim_check_reg <= frame_len_lim_check_next;
 
     m_axis_rx_tdata_reg <= m_axis_rx_tdata_next;
     m_axis_rx_tvalid_reg <= m_axis_rx_tvalid_next;
