@@ -187,6 +187,7 @@ out_type_t fcs_output_type_0;
 out_type_t fcs_output_type_1;
 
 logic [7:0] ifg_offset;
+logic extra_cycle;
 
 logic frame_start_reg = 1'b0, frame_start_next;
 logic frame_reg = 1'b0, frame_next;
@@ -201,9 +202,7 @@ logic [12:0] frame_len_lim_cyc_reg = '0, frame_len_lim_cyc_next;
 logic [2:0] frame_len_lim_last_reg = '0, frame_len_lim_last_next;
 logic frame_len_lim_check_reg = '0, frame_len_lim_check_next;
 logic [7:0] ifg_cnt_reg = '0, ifg_cnt_next;
-
-logic [7:0] ifg_count_reg = 8'd0, ifg_count_next;
-logic [1:0] deficit_idle_count_reg = 2'd0, deficit_idle_count_next;
+logic [1:0] deficit_idle_cnt_reg = 2'd0, deficit_idle_cnt_next;
 
 logic s_axis_tx_tready_reg = 1'b0, s_axis_tx_tready_next;
 
@@ -317,6 +316,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_TERM_5;
             fcs_output_type_1 = OUTPUT_TYPE_IDLE;
             ifg_offset = 8'd3;
+            extra_cycle = 1'b0;
         end
         3'd6: begin
             fcs_output_data_0 = {16'd0, ~crc_state[31:0], s_tdata_reg[15:0]};
@@ -324,6 +324,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_TERM_6;
             fcs_output_type_1 = OUTPUT_TYPE_IDLE;
             ifg_offset = 8'd2;
+            extra_cycle = 1'b0;
         end
         3'd5: begin
             fcs_output_data_0 = {8'd0, ~crc_state[31:0], s_tdata_reg[23:0]};
@@ -331,6 +332,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_TERM_7;
             fcs_output_type_1 = OUTPUT_TYPE_IDLE;
             ifg_offset = 8'd1;
+            extra_cycle = 1'b0;
         end
         3'd4: begin
             fcs_output_data_0 = {~crc_state[31:0], s_tdata_reg[31:0]};
@@ -338,6 +340,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_DATA;
             fcs_output_type_1 = OUTPUT_TYPE_TERM_0;
             ifg_offset = 8'd8;
+            extra_cycle = 1'b1;
         end
         3'd3: begin
             fcs_output_data_0 = {~crc_state[23:0], s_tdata_reg[39:0]};
@@ -345,6 +348,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_DATA;
             fcs_output_type_1 = OUTPUT_TYPE_TERM_1;
             ifg_offset = 8'd7;
+            extra_cycle = 1'b1;
         end
         3'd2: begin
             fcs_output_data_0 = {~crc_state[15:0], s_tdata_reg[47:0]};
@@ -352,6 +356,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_DATA;
             fcs_output_type_1 = OUTPUT_TYPE_TERM_2;
             ifg_offset = 8'd6;
+            extra_cycle = 1'b1;
         end
         3'd1: begin
             fcs_output_data_0 = {~crc_state[7:0], s_tdata_reg[55:0]};
@@ -359,6 +364,7 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_DATA;
             fcs_output_type_1 = OUTPUT_TYPE_TERM_3;
             ifg_offset = 8'd5;
+            extra_cycle = 1'b1;
         end
         3'd0: begin
             fcs_output_data_0 = s_tdata_reg;
@@ -366,13 +372,13 @@ always_comb begin
             fcs_output_type_0 = OUTPUT_TYPE_DATA;
             fcs_output_type_1 = OUTPUT_TYPE_TERM_4;
             ifg_offset = 8'd4;
+            extra_cycle = 1'b1;
         end
     endcase
 end
 
 always_comb begin
     state_next = STATE_IDLE;
-
 
     swap_lanes_next = swap_lanes_reg;
 
@@ -389,9 +395,7 @@ always_comb begin
     frame_len_lim_last_next = frame_len_lim_last_reg;
     frame_len_lim_check_next = frame_len_lim_check_reg;
     ifg_cnt_next = ifg_cnt_reg;
-
-    ifg_count_next = ifg_count_reg;
-    deficit_idle_count_next = deficit_idle_count_reg;
+    deficit_idle_cnt_next = deficit_idle_cnt_reg;
 
     s_axis_tx_tready_next = 1'b0;
 
@@ -515,8 +519,8 @@ always_comb begin
                     state_next = STATE_PAYLOAD;
                 end else begin
                     swap_lanes_next = 1'b0;
-                    ifg_count_next = 8'd0;
-                    deficit_idle_count_next = 2'd0;
+                    ifg_cnt_next = 8'd0;
+                    deficit_idle_cnt_next = 2'd0;
                     state_next = STATE_IDLE;
                 end
             end
@@ -567,8 +571,9 @@ always_comb begin
                 output_data_next = fcs_output_data_0;
                 output_type_next = fcs_output_type_0;
 
-                ifg_count_next = (cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12) - ifg_offset + (swap_lanes_reg ? 8'd4 : 8'd0) + 8'(deficit_idle_count_reg);
-                if (s_empty_reg <= 4) begin
+                ifg_cnt_next = (cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12) - ifg_offset + (swap_lanes_reg ? 8'd4 : 8'd0) + 8'(deficit_idle_cnt_reg);
+
+                if (extra_cycle) begin
                     stat_tx_byte_next = 4'(KEEP_W);
                     state_next = STATE_FCS_2;
                 end else begin
@@ -607,27 +612,29 @@ always_comb begin
 
                 crc_data_next = {24'd0, s_axis_tx.tdata} ^ {56'd0, 32'hffffffff};
 
+                ifg_cnt_next = (cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12) - ifg_offset + (swap_lanes_reg ? 8'd4 : 8'd0) + 8'(deficit_idle_cnt_reg);
+
                 if (DIC_EN) begin
-                    if (ifg_count_next > 8'd7) begin
+                    if (ifg_cnt_next > 8'd7) begin
                         state_next = STATE_IFG;
                     end else begin
-                        if (ifg_count_next >= 8'd4) begin
-                            deficit_idle_count_next = 2'(ifg_count_next - 8'd4);
+                        if (ifg_cnt_next >= 8'd4) begin
+                            deficit_idle_cnt_next = 2'(ifg_cnt_next - 8'd4);
                             swap_lanes_next = 1'b1;
                         end else begin
-                            deficit_idle_count_next = 2'(ifg_count_next);
-                            ifg_count_next = 8'd0;
+                            deficit_idle_cnt_next = 2'(ifg_cnt_next);
+                            ifg_cnt_next = 8'd0;
                             swap_lanes_next = 1'b0;
                         end
                         s_axis_tx_tready_next = cfg_tx_enable;
                         state_next = STATE_IDLE;
                     end
                 end else begin
-                    if (ifg_count_next > 8'd4) begin
+                    if (ifg_cnt_next > 8'd4) begin
                         state_next = STATE_IFG;
                     end else begin
                         s_axis_tx_tready_next = cfg_tx_enable;
-                        swap_lanes_next = ifg_count_next != 0;
+                        swap_lanes_next = ifg_cnt_next != 0;
                         state_next = STATE_IDLE;
                     end
                 end
@@ -639,7 +646,7 @@ always_comb begin
                 output_data_next = s_tdata_reg;
                 output_type_next = OUTPUT_TYPE_ERROR;
 
-                ifg_count_next = cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12;
+                ifg_cnt_next = cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12;
 
                 stat_tx_pkt_len_next = frame_len_reg;
                 stat_tx_pkt_good_next = !frame_error_reg;
@@ -661,33 +668,27 @@ always_comb begin
 
                 crc_data_next = {24'd0, s_axis_tx.tdata} ^ {56'd0, 32'hffffffff};
 
-                if (ifg_count_reg > 8'd8) begin
-                    ifg_count_next = ifg_count_reg - 8'd8;
-                end else begin
-                    ifg_count_next = 8'd0;
-                end
-
                 if (DIC_EN) begin
-                    if (ifg_count_next > 8'd7 || frame_reg) begin
+                    if (ifg_cnt_next > 8'd7 || frame_reg) begin
                         state_next = STATE_IFG;
                     end else begin
-                        if (ifg_count_next >= 8'd4) begin
-                            deficit_idle_count_next = 2'(ifg_count_next - 8'd4);
+                        if (ifg_cnt_next >= 8'd4) begin
+                            deficit_idle_cnt_next = 2'(ifg_cnt_next - 8'd4);
                             swap_lanes_next = 1'b1;
                         end else begin
-                            deficit_idle_count_next = 2'(ifg_count_next);
-                            ifg_count_next = 8'd0;
+                            deficit_idle_cnt_next = 2'(ifg_cnt_next);
+                            ifg_cnt_next = 8'd0;
                             swap_lanes_next = 1'b0;
                         end
                         s_axis_tx_tready_next = cfg_tx_enable;
                         state_next = STATE_IDLE;
                     end
                 end else begin
-                    if (ifg_count_next > 8'd4 || frame_reg) begin
+                    if (ifg_cnt_next > 8'd4 || frame_reg) begin
                         state_next = STATE_IFG;
                     end else begin
                         s_axis_tx_tready_next = cfg_tx_enable;
-                        swap_lanes_next = ifg_count_next != 0;
+                        swap_lanes_next = ifg_cnt_next != 0;
                         state_next = STATE_IDLE;
                     end
                 end
@@ -718,9 +719,7 @@ always_ff @(posedge clk) begin
     frame_len_lim_last_reg <= frame_len_lim_last_next;
     frame_len_lim_check_reg <= frame_len_lim_check_next;
     ifg_cnt_reg <= ifg_cnt_next;
-
-    ifg_count_reg <= ifg_count_next;
-    deficit_idle_count_reg <= deficit_idle_count_next;
+    deficit_idle_cnt_reg <= deficit_idle_cnt_next;
 
     s_tdata_reg <= s_tdata_next;
     s_empty_reg <= s_empty_next;
@@ -966,14 +965,12 @@ always_ff @(posedge clk) begin
     if (rst) begin
         state_reg <= STATE_IDLE;
 
-        frame_start_reg <= 1'b0;
-        frame_reg <= 1'b0;
-
         swap_lanes_reg <= 1'b0;
         swap_lanes_d1_reg <= 1'b0;
 
-        ifg_count_reg <= 8'd0;
-        deficit_idle_count_reg <= 2'd0;
+        frame_start_reg <= 1'b0;
+        frame_reg <= 1'b0;
+        deficit_idle_cnt_reg <= 2'd0;
 
         s_axis_tx_tready_reg <= 1'b0;
 

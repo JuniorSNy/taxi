@@ -138,7 +138,6 @@ logic [CTRL_W-1:0] fcs_output_txc_0;
 logic [CTRL_W-1:0] fcs_output_txc_1;
 
 logic [7:0] ifg_offset;
-
 logic extra_cycle;
 
 logic frame_reg = 1'b0, frame_next;
@@ -153,9 +152,7 @@ logic [13:0] frame_len_lim_cyc_reg = '0, frame_len_lim_cyc_next;
 logic [1:0] frame_len_lim_last_reg = '0, frame_len_lim_last_next;
 logic frame_len_lim_check_reg = '0, frame_len_lim_check_next;
 logic [7:0] ifg_cnt_reg = '0, ifg_cnt_next;
-
-logic [7:0] ifg_count_reg = 8'd0, ifg_count_next;
-logic [1:0] deficit_idle_count_reg = 2'd0, deficit_idle_count_next;
+logic [1:0] deficit_idle_cnt_reg = 2'd0, deficit_idle_cnt_next;
 
 logic s_axis_tx_tready_reg = 1'b0, s_axis_tx_tready_next;
 
@@ -286,7 +283,6 @@ end
 always_comb begin
     state_next = STATE_IDLE;
 
-
     frame_next = frame_reg;
     frame_error_next = frame_error_reg;
     frame_oversize_next = frame_oversize_reg;
@@ -299,9 +295,7 @@ always_comb begin
     frame_len_lim_last_next = frame_len_lim_last_reg;
     frame_len_lim_check_next = frame_len_lim_check_reg;
     ifg_cnt_next = ifg_cnt_reg;
-
-    ifg_count_next = ifg_count_reg;
-    deficit_idle_count_next = deficit_idle_count_reg;
+    deficit_idle_cnt_next = deficit_idle_cnt_reg;
 
     s_axis_tx_tready_next = 1'b0;
 
@@ -428,8 +422,8 @@ always_comb begin
                     s_axis_tx_tready_next = 1'b1;
                     state_next = STATE_PREAMBLE;
                 end else begin
-                    ifg_count_next = 8'd0;
-                    deficit_idle_count_next = 2'd0;
+                    ifg_cnt_next = 8'd0;
+                    deficit_idle_cnt_next = 2'd0;
                     state_next = STATE_IDLE;
                 end
             end
@@ -496,7 +490,6 @@ always_comb begin
 
                 stat_tx_byte_next = 3'(CTRL_W);
 
-                ifg_count_next = (cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12) - ifg_offset + 8'(deficit_idle_count_reg);
                 if (frame_error_reg) begin
                     state_next = STATE_ERR;
                 end else begin
@@ -512,6 +505,8 @@ always_comb begin
 
                 stat_tx_byte_next = 4-s_empty_reg;
                 frame_len_next = frame_len_reg + 16'(4-s_empty_reg);
+
+                ifg_cnt_next = (cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12) - ifg_offset + 8'(deficit_idle_cnt_reg);
 
                 if (extra_cycle) begin
                     state_next = STATE_FCS_3;
@@ -543,17 +538,19 @@ always_comb begin
                 stat_tx_pkt_vlan_next = is_8021q_reg;
                 stat_tx_err_oversize_next = frame_oversize_reg;
 
+                ifg_cnt_next = (cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12) - ifg_offset + 8'(deficit_idle_cnt_reg);
+
                 if (DIC_EN) begin
-                    if (ifg_count_next > 8'd3) begin
+                    if (ifg_cnt_next > 8'd3) begin
                         state_next = STATE_IFG;
                     end else begin
-                        deficit_idle_count_next = 2'(ifg_count_next);
-                        ifg_count_next = 8'd0;
+                        deficit_idle_cnt_next = 2'(ifg_cnt_next);
+                        ifg_cnt_next = 8'd0;
                         s_axis_tx_tready_next = 1'b1;
                         state_next = STATE_IDLE;
                     end
                 end else begin
-                    if (ifg_count_next > 8'd0) begin
+                    if (ifg_cnt_next > 8'd0) begin
                         state_next = STATE_IFG;
                     end else begin
                         state_next = STATE_IDLE;
@@ -568,7 +565,7 @@ always_comb begin
                 xgmii_txd_next = {XGMII_TERM, {3{XGMII_ERROR}}};
                 xgmii_txc_next = {CTRL_W{1'b1}};
 
-                ifg_count_next = cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12;
+                ifg_cnt_next = cfg_tx_ifg > 8'd12 ? cfg_tx_ifg : 8'd12;
 
                 stat_tx_pkt_len_next = frame_len_reg;
                 stat_tx_pkt_good_next = !frame_error_reg;
@@ -589,22 +586,16 @@ always_comb begin
                 xgmii_txd_next = {CTRL_W{XGMII_IDLE}};
                 xgmii_txc_next = {CTRL_W{1'b1}};
 
-                if (ifg_count_reg > 8'd4) begin
-                    ifg_count_next = ifg_count_reg - 8'd4;
-                end else begin
-                    ifg_count_next = 8'd0;
-                end
-
                 if (DIC_EN) begin
-                    if (ifg_count_next > 8'd3 || frame_reg) begin
+                    if (ifg_cnt_next > 8'd3 || frame_reg) begin
                         state_next = STATE_IFG;
                     end else begin
-                        deficit_idle_count_next = 2'(ifg_count_next);
-                        ifg_count_next = 8'd0;
+                        deficit_idle_cnt_next = 2'(ifg_cnt_next);
+                        ifg_cnt_next = 8'd0;
                         state_next = STATE_IDLE;
                     end
                 end else begin
-                    if (ifg_count_next > 8'd0 || frame_reg) begin
+                    if (ifg_cnt_next > 8'd0 || frame_reg) begin
                         state_next = STATE_IFG;
                     end else begin
                         state_next = STATE_IDLE;
@@ -634,9 +625,7 @@ always_ff @(posedge clk) begin
     frame_len_lim_last_reg <= frame_len_lim_last_next;
     frame_len_lim_check_reg <= frame_len_lim_check_next;
     ifg_cnt_reg <= ifg_cnt_next;
-
-    ifg_count_reg <= ifg_count_next;
-    deficit_idle_count_reg <= deficit_idle_count_next;
+    deficit_idle_cnt_reg <= deficit_idle_cnt_next;
 
     s_tdata_reg <= s_tdata_next;
     s_empty_reg <= s_empty_next;
@@ -679,9 +668,7 @@ always_ff @(posedge clk) begin
         state_reg <= STATE_IDLE;
 
         frame_reg <= 1'b0;
-
-        ifg_count_reg <= 8'd0;
-        deficit_idle_count_reg <= 2'd0;
+        deficit_idle_cnt_reg <= 2'd0;
 
         s_axis_tx_tready_reg <= 1'b0;
 
