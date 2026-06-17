@@ -158,6 +158,8 @@ class BaseXSerdesSource():
         self.queue_occupancy_limit_bytes = -1
         self.queue_occupancy_limit_frames = -1
 
+        self.an_cfg = None
+
         self.width = len(self.data)
         self.byte_size = 8
         self.byte_lanes = self.width // self.byte_size
@@ -275,9 +277,13 @@ class BaseXSerdesSource():
         self.idle_event.set()
         self.queue_occupancy_bytes = 0
         self.queue_occupancy_frames = 0
+        self.an_cfg = None
 
     async def wait(self):
         await self.idle_event.wait()
+
+    def set_an_cfg(self, cfg=None):
+        self.an_cfg = cfg
 
     async def _run(self):
         frame = None
@@ -299,6 +305,9 @@ class BaseXSerdesSource():
 
         data = 0
         data_k = 0
+
+        an_cfg = []
+        an_phase = False
 
         while True:
             await clock_edge_event
@@ -404,7 +413,10 @@ class BaseXSerdesSource():
                         elif deficit_idle_cnt > 0:
                             deficit_idle_cnt -= 1
 
-                if frame is not None:
+                if an_cfg:
+                    d_val = an_cfg.pop(0)
+                    k_val = False
+                elif frame is not None:
                     if frame_offset == 0:
                         # /S/
                         d_val = XgmiiCtrl.START # /K27.7/
@@ -434,6 +446,15 @@ class BaseXSerdesSource():
                             d_val = d # /Dx.y/
                             k_val = False
                     frame_offset += 1
+                elif self.an_cfg is not None and odd:
+                    self.log.info("TX config reg: 0x%04x", self.an_cfg)
+                    an_cfg = [self.an_cfg & 0xff, (self.an_cfg >> 8) & 0xff]
+                    if an_phase:
+                        d_val = 0x42
+                    else:
+                        d_val = 0xb5
+                    k_val = False
+                    an_phase = not an_phase
 
                 if self.enc_8b10b:
                     # 8b/10b encode
@@ -515,6 +536,11 @@ class BaseXSerdesSink:
         self.queue_occupancy_bytes = 0
         self.queue_occupancy_frames = 0
 
+        self.an_cfg = None
+        self.an_ability_match_cnt = 0
+        self.an_ack_match_cnt = 0
+        self.an_idle_match_cnt = 0
+
         self.width = len(self.data)
         self.byte_size = 8
         self.byte_lanes = self.width // self.byte_size
@@ -579,6 +605,20 @@ class BaseXSerdesSink:
                 continue
             self.gbx_bit_cnt += in_bits
 
+    def get_an_cfg(self):
+        an_cfg = self.an_cfg
+        self.an_cfg = None
+        return an_cfg
+
+    def get_an_ability_match(self):
+        return self.an_ability_match_cnt > 2
+
+    def get_an_ack_match(self):
+        return self.an_ack_match_cnt > 2
+
+    def get_an_idle_match(self):
+        return self.an_idle_match_cnt > 2
+
     def _recv(self, frame, compact=True):
         if self.queue.empty():
             self.active_event.clear()
@@ -636,6 +676,9 @@ class BaseXSerdesSink:
 
         data = 0
         data_k = 0
+
+        an_cfg = None
+        last_an_cfg = 0
 
         while True:
             await clock_edge_event
@@ -719,21 +762,10 @@ class BaseXSerdesSink:
 
                 # 1000BASE-X decoding
 
-                if frame is None:
-                    if k_val:
-                        if d_val == 0xBC:
-                            # K28.5
-                            # sync
-                            odd = False
-                        elif d_val == XgmiiCtrl.START:
-                            # start
-                            if not odd:
-                                frame = GmiiFrame(bytearray([EthPre.PRE]), [False])
-                                frame.sim_time_start = sim_time + (clk_period // self.byte_lanes * k) + gbx_delay
-                                in_pre = True
-                            else:
-                                self.log.warning("Ignoring unaligned start")
-                else:
+                an_cnt_reset = True
+
+                if frame is not None:
+                    # in a frame
                     if k_val:
                         # got a control character; terminate frame reception
                         if d_val != XgmiiCtrl.TERM:
@@ -753,6 +785,7 @@ class BaseXSerdesSink:
 
                         frame = None
                     else:
+                        # normal frame data
                         if frame.sim_time_sfd is None and not in_pre:
                             frame.sim_time_sfd = sim_time + (clk_period // self.byte_lanes * k) + gbx_delay
                         if d_val == EthPre.SFD:
@@ -760,5 +793,75 @@ class BaseXSerdesSink:
 
                         frame.data.append(d_val)
                         frame.error.append(False)
+                elif an_cfg is not None:
+                    # config register
+                    an_cnt_reset = False
+                    self.an_idle_match_cnt = 0
+
+                    if k_val:
+                        # got a control character; abort
+                        an_cfg = None
+                    else:
+                        an_cfg.append(d_val)
+
+                        if len(an_cfg) == 2:
+                            an_cfg = an_cfg[0] | (an_cfg[1] << 8)
+                            self.log.info("RX config reg: 0x%04x", an_cfg)
+                            if (last_an_cfg ^ an_cfg) & 0x4000 == 0:
+                                self.an_ability_match_cnt += 1
+                            else:
+                                self.an_ability_match_cnt = 0
+                            if last_an_cfg == an_cfg and an_cfg & 0x4000:
+                                self.an_ack_match_cnt += 1
+                            else:
+                                self.an_ack_match_cnt = 0
+                            last_an_cfg = an_cfg
+                            self.an_cfg = an_cfg
+                            an_cfg = None
+                else:
+                    # idle
+                    if k_val:
+                        # control character
+                        if d_val == 0xBC:
+                            # K28.5
+                            # sync
+                            odd = False
+                            an_cnt_reset = False
+                        elif d_val == XgmiiCtrl.START:
+                            # start
+                            if not odd:
+                                frame = GmiiFrame(bytearray([EthPre.PRE]), [False])
+                                frame.sim_time_start = sim_time + (clk_period // self.byte_lanes * k) + gbx_delay
+                                in_pre = True
+                            else:
+                                self.log.warning("Ignoring unaligned start")
+                        elif d_val == XgmiiCtrl.ERROR:
+                            # error propagation
+                            pass
+                        elif d_val == XgmiiCtrl.TERM:
+                            # termination
+                            pass
+                        elif d_val == 0xf7:
+                            # carrier extend
+                            pass
+                        else:
+                            self.log.warning("Unknown control character 0x%02x (K%d.%d)", d_val, d_val & 0x1f, d_val >> 5)
+                    else:
+                        # data
+                        if d_val == 0xb5 or d_val == 0x42:
+                            # config reg
+                            an_cfg = []
+                            an_cnt_reset = False
+                        else:
+                            # idle
+                            an_cnt_reset = False
+                            self.an_ability_match_cnt = 0
+                            self.an_ack_match_cnt = 0
+                            self.an_idle_match_cnt += 1
+
+                if an_cnt_reset:
+                    self.an_ability_match_cnt = 0
+                    self.an_ack_match_cnt = 0
+                    self.an_idle_match_cnt = 0
 
                 odd = not odd
