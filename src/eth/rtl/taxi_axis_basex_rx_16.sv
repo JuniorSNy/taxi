@@ -223,9 +223,9 @@ end
 
 assign rx_an_cfg = AN_EN ? rx_an_cfg_reg : '0;
 assign rx_an_cfg_valid = AN_EN ? rx_an_cfg_valid_reg : 1'b0;
-assign rx_an_ability_match = AN_EN ? &an_ability_match_cnt_reg : 1'b0;
-assign rx_an_ack_match = AN_EN ? &an_ack_match_cnt_reg : 1'b0;
-assign rx_an_idle_match = AN_EN ? &an_idle_match_cnt_reg : 1'b0;
+assign rx_an_ability_match = AN_EN ? an_ability_match_cnt_reg[1] : 1'b0;
+assign rx_an_ack_match = AN_EN ? an_ack_match_cnt_reg[1] : 1'b0;
+assign rx_an_idle_match = AN_EN ? an_idle_match_cnt_reg[1] : 1'b0;
 
 assign rx_start_packet = start_packet_reg;
 
