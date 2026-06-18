@@ -105,9 +105,9 @@ logic               gmii_rx_valid_reg = '0, gmii_rx_valid_next;
 logic [15:0] rx_an_cfg_reg = '0, rx_an_cfg_next;
 logic rx_an_cfg_valid_reg = 1'b0, rx_an_cfg_valid_next;
 logic an_cfg_match_reg = 1'b0, an_cfg_match_next;
-logic [1:0] an_ability_match_cnt_reg = '0, an_ability_match_cnt_next;
-logic [1:0] an_ack_match_cnt_reg = '0, an_ack_match_cnt_next;
-logic [1:0] an_idle_match_cnt_reg = '0, an_idle_match_cnt_next;
+logic [1:0] an_ability_match_reg = '0, an_ability_match_next;
+logic [1:0] an_ack_match_reg = '0, an_ack_match_next;
+logic [1:0] an_idle_match_reg = '0, an_idle_match_next;
 
 logic stat_rx_err_bad_block_reg = '0, stat_rx_err_bad_block_next;
 logic stat_rx_err_framing_reg = '0, stat_rx_err_framing_next;
@@ -119,9 +119,9 @@ assign gmii_rx_valid = gmii_rx_valid_reg;
 
 assign rx_an_cfg = AN_EN ? rx_an_cfg_reg : '0;
 assign rx_an_cfg_valid = AN_EN ? rx_an_cfg_valid_reg : 1'b0;
-assign rx_an_ability_match = AN_EN ? an_ability_match_cnt_reg[1] : 1'b0;
-assign rx_an_ack_match = AN_EN ? an_ack_match_cnt_reg[1] : 1'b0;
-assign rx_an_idle_match = AN_EN ? an_idle_match_cnt_reg[1] : 1'b0;
+assign rx_an_ability_match = AN_EN ? an_ability_match_reg[1] : 1'b0;
+assign rx_an_ack_match = AN_EN ? an_ack_match_reg[1] : 1'b0;
+assign rx_an_idle_match = AN_EN ? an_idle_match_reg[1] : 1'b0;
 
 assign stat_rx_err_bad_block = stat_rx_err_bad_block_reg;
 assign stat_rx_err_framing = stat_rx_err_framing_reg;
@@ -140,9 +140,9 @@ always_comb begin
     rx_an_cfg_next = rx_an_cfg_reg;
     rx_an_cfg_valid_next = 1'b0;
     an_cfg_match_next = an_cfg_match_reg;
-    an_ability_match_cnt_next = an_ability_match_cnt_reg;
-    an_ack_match_cnt_next = an_ack_match_cnt_reg;
-    an_idle_match_cnt_next = an_idle_match_cnt_reg;
+    an_ability_match_next = an_ability_match_reg;
+    an_ack_match_next = an_ack_match_reg;
+    an_idle_match_next = an_idle_match_reg;
 
     stat_rx_err_bad_block_next = 1'b0;
     stat_rx_err_framing_next = 1'b0;
@@ -202,11 +202,9 @@ always_comb begin
                     gmii_rx_er_next[seg] = 1'b0;
                 end else if (AN_EN && k28p5_cyc && (encoded_rx_data[seg*8 +: 8] == D(5,6) || encoded_rx_data[seg*8 +: 8] == D(16,2))) begin
                     // I1/I2
-                    an_ability_match_cnt_next = '0;
-                    an_ack_match_cnt_next = '0;
-                    if (!(&an_idle_match_cnt_next)) begin
-                        an_idle_match_cnt_next = an_idle_match_cnt_next + 1;
-                    end
+                    an_ability_match_next = '0;
+                    an_ack_match_next = '0;
+                    an_idle_match_next = {an_idle_match_next[0], 1'b1};
                 end else if (AN_EN && k28p5_cyc && (encoded_rx_data[seg*8 +: 8] == D(21,5) || encoded_rx_data[seg*8 +: 8] == D(2,2))) begin
                     // C1/C2
                     c_cyc = 1'b1;
@@ -214,25 +212,21 @@ always_comb begin
                     if (!odd_cyc) begin
                         rx_an_cfg_next[7:0] = encoded_rx_data[seg*8 +: 8];
                         an_cfg_match_next = rx_an_cfg_next[7:0] == encoded_rx_data[seg*8 +: 8];
-                        an_idle_match_cnt_next = '0;
+                        an_idle_match_next = '0;
                     end else begin
                         rx_an_cfg_next[15:8] = encoded_rx_data[seg*8 +: 8];
                         rx_an_cfg_valid_next = 1'b1;
                         if (an_cfg_match_next && ((rx_an_cfg_next[15:8] ^ encoded_rx_data[seg*8 +: 8]) & 8'h40) == 0) begin
-                            if (!(&an_ability_match_cnt_next)) begin
-                                an_ability_match_cnt_next = an_ability_match_cnt_next + 1;
-                            end
+                            an_ability_match_next = {an_ability_match_next[0], 1'b1};
                         end else begin
-                            an_ability_match_cnt_next = '0;
+                            an_ability_match_next = '0;
                         end
                         if (an_cfg_match_next && rx_an_cfg_next[14] && rx_an_cfg_next[15:8] == encoded_rx_data[seg*8 +: 8]) begin
-                            if (!(&an_ack_match_cnt_next)) begin
-                                an_ack_match_cnt_next = an_ack_match_cnt_next + 1;
-                            end
+                            an_ack_match_next = {an_ack_match_next[0], 1'b1};
                         end else begin
-                            an_ack_match_cnt_next = '0;
+                            an_ack_match_next = '0;
                         end
-                        an_idle_match_cnt_next = '0;
+                        an_idle_match_next = '0;
                         c_cyc = 1'b0;
                     end
                 end
@@ -271,9 +265,9 @@ always_ff @(posedge clk) begin
     rx_an_cfg_reg <= rx_an_cfg_next;
     rx_an_cfg_valid_reg <= rx_an_cfg_valid_next;
     an_cfg_match_reg <= an_cfg_match_next;
-    an_ability_match_cnt_reg <= an_ability_match_cnt_next;
-    an_ack_match_cnt_reg <= an_ack_match_cnt_next;
-    an_idle_match_cnt_reg <= an_idle_match_cnt_next;
+    an_ability_match_reg <= an_ability_match_next;
+    an_ack_match_reg <= an_ack_match_next;
+    an_idle_match_reg <= an_idle_match_next;
 
     stat_rx_err_bad_block_reg <= stat_rx_err_bad_block_next;
     stat_rx_err_framing_reg <= stat_rx_err_framing_next;
@@ -290,9 +284,9 @@ always_ff @(posedge clk) begin
         gmii_rx_valid_reg <= 1'b0;
 
         rx_an_cfg_valid_reg <= 1'b0;
-        an_ability_match_cnt_reg <= '0;
-        an_ack_match_cnt_reg <= '0;
-        an_idle_match_cnt_reg <= '0;
+        an_ability_match_reg <= '0;
+        an_ack_match_reg <= '0;
+        an_idle_match_reg <= '0;
 
         stat_rx_err_bad_block_reg <= 1'b0;
         stat_rx_err_framing_reg <= 1'b0;

@@ -165,9 +165,9 @@ logic m_axis_rx_tuser_reg = 1'b0, m_axis_rx_tuser_next;
 logic [15:0] rx_an_cfg_reg = '0;
 logic rx_an_cfg_valid_reg = 1'b0;
 logic an_cfg_match_reg = 1'b0;
-logic [1:0] an_ability_match_cnt_reg = '0;
-logic [1:0] an_ack_match_cnt_reg = '0;
-logic [1:0] an_idle_match_cnt_reg = '0;
+logic [1:0] an_ability_match_reg = '0;
+logic [1:0] an_ack_match_reg = '0;
+logic [1:0] an_idle_match_reg = '0;
 
 logic start_packet_int_reg = 1'b0;
 logic start_packet_reg = 1'b0;
@@ -207,9 +207,9 @@ end
 
 assign rx_an_cfg = AN_EN ? rx_an_cfg_reg : '0;
 assign rx_an_cfg_valid = AN_EN ? rx_an_cfg_valid_reg : 1'b0;
-assign rx_an_ability_match = AN_EN ? an_ability_match_cnt_reg[1] : 1'b0;
-assign rx_an_ack_match = AN_EN ? an_ack_match_cnt_reg[1] : 1'b0;
-assign rx_an_idle_match = AN_EN ? an_idle_match_cnt_reg[1] : 1'b0;
+assign rx_an_ability_match = AN_EN ? an_ability_match_reg[1] : 1'b0;
+assign rx_an_ack_match = AN_EN ? an_ack_match_reg[1] : 1'b0;
+assign rx_an_idle_match = AN_EN ? an_idle_match_reg[1] : 1'b0;
 
 assign rx_start_packet = start_packet_reg;
 
@@ -530,11 +530,9 @@ always_ff @(posedge clk) begin
         end
 
         if (AN_EN && input_i_d0_reg) begin
-            an_ability_match_cnt_reg <= '0;
-            an_ack_match_cnt_reg <= '0;
-            if (!(&an_idle_match_cnt_reg)) begin
-                an_idle_match_cnt_reg <= an_idle_match_cnt_reg + 1;
-            end
+            an_ability_match_reg <= '0;
+            an_ack_match_reg <= '0;
+            an_idle_match_reg <= {an_idle_match_reg[0], 1'b1};
         end
 
         // config symbol detection
@@ -546,27 +544,23 @@ always_ff @(posedge clk) begin
             rx_an_cfg_reg[7:0] <= encoded_rx_data;
             an_cfg_match_reg <= rx_an_cfg_reg[7:0] == encoded_rx_data;
             input_c_d1_reg <= encoded_rx_data_k == 1'b0;
-            an_idle_match_cnt_reg <= '0;
+            an_idle_match_reg <= '0;
         end
 
         if (AN_EN && input_c_d1_reg) begin
             rx_an_cfg_reg[15:8] <= encoded_rx_data;
             rx_an_cfg_valid_reg <= encoded_rx_data_k == 1'b0;
             if (an_cfg_match_reg && ((rx_an_cfg_reg[15:8] ^ encoded_rx_data) & 8'h40) == 0) begin
-                if (!(&an_ability_match_cnt_reg)) begin
-                    an_ability_match_cnt_reg <= an_ability_match_cnt_reg + 1;
-                end
+                an_ability_match_reg <= {an_ability_match_reg[0], 1'b1};
             end else begin
-                an_ability_match_cnt_reg <= '0;
+                an_ability_match_reg <= '0;
             end
             if (an_cfg_match_reg && rx_an_cfg_reg[14] && rx_an_cfg_reg[15:8] == encoded_rx_data) begin
-                if (!(&an_ack_match_cnt_reg)) begin
-                    an_ack_match_cnt_reg <= an_ack_match_cnt_reg + 1;
-                end
+                an_ack_match_reg <= {an_ack_match_reg[0], 1'b1};
             end else begin
-                an_ack_match_cnt_reg <= '0;
+                an_ack_match_reg <= '0;
             end
-            an_idle_match_cnt_reg <= '0;
+            an_idle_match_reg <= '0;
         end
 
         // start control character detection
@@ -575,9 +569,9 @@ always_ff @(posedge clk) begin
         end
 
         if (AN_EN && input_start_d0_reg) begin
-            an_ability_match_cnt_reg <= '0;
-            an_ack_match_cnt_reg <= '0;
-            an_idle_match_cnt_reg <= '0;
+            an_ability_match_reg <= '0;
+            an_ack_match_reg <= '0;
+            an_idle_match_reg <= '0;
         end
 
         if (reset_crc) begin
@@ -615,9 +609,9 @@ always_ff @(posedge clk) begin
         m_axis_rx_tvalid_reg <= 1'b0;
 
         rx_an_cfg_valid_reg <= 1'b0;
-        an_ability_match_cnt_reg <= '0;
-        an_ack_match_cnt_reg <= '0;
-        an_idle_match_cnt_reg <= '0;
+        an_ability_match_reg <= '0;
+        an_ack_match_reg <= '0;
+        an_idle_match_reg <= '0;
 
         start_packet_int_reg <= 1'b0;
         start_packet_reg <= 1'b0;
