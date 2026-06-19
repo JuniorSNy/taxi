@@ -71,6 +71,9 @@ class BaseRSerdesSource():
         self.queue_occupancy_limit_bytes = -1
         self.queue_occupancy_limit_frames = -1
 
+        self.os = None
+        self.os_sig = False
+
         self.width = len(self.data)
         self.byte_size = 8
         self.byte_lanes = self.width // self.byte_size
@@ -191,9 +194,21 @@ class BaseRSerdesSource():
         self.idle_event.set()
         self.queue_occupancy_bytes = 0
         self.queue_occupancy_frames = 0
+        self.os = None
+        self.os_sig = False
 
     async def wait(self):
         await self.idle_event.wait()
+
+    def set_seq_os(self, os=None):
+        self.set_os(os, False)
+
+    def set_sig_os(self, os=None):
+        self.set_os(os, True)
+
+    def set_os(self, os=None, sig=False):
+        self.os = os
+        self.os_sig = sig
 
     async def _run(self):
         frame = None
@@ -326,132 +341,141 @@ class BaseRSerdesSource():
                     # clear counters
                     deficit_idle_cnt = 0
                     ifg_cnt = 0
+                    self.active = False
+                    self.idle_event.set()
 
-            if frame is not None:
-                dl = bytearray()
-                cl = []
+            dl = bytearray()
+            cl = []
 
-                for k in range(8):
-                    if frame is not None:
-                        d = frame.data[frame_offset]
-                        if frame.sim_time_sfd is None and not in_pre:
-                            frame.sim_time_sfd = sim_time + (clk_period // self.byte_lanes * k) - gbx_delay
-                        if d == EthPre.SFD:
-                            in_pre = False
-                        dl.append(d)
-                        cl.append(frame.ctrl[frame_offset])
-                        frame_offset += 1
+            for k in range(8):
+                if frame is not None:
+                    d = frame.data[frame_offset]
+                    if frame.sim_time_sfd is None and not in_pre:
+                        frame.sim_time_sfd = sim_time + (clk_period // self.byte_lanes * k) - gbx_delay
+                    if d == EthPre.SFD:
+                        in_pre = False
+                    dl.append(d)
+                    cl.append(frame.ctrl[frame_offset])
+                    frame_offset += 1
 
-                        if frame_offset >= len(frame.data):
-                            ifg_cnt = max(self.ifg - (8-k), 0)
-                            frame.sim_time_end = sim_time + (clk_period // self.byte_lanes * k) - gbx_delay
-                            frame.handle_tx_complete()
-                            frame = None
-                            self.current_frame = None
-                    else:
-                        dl.append(XgmiiCtrl.IDLE)
-                        cl.append(1)
-
-                # remap control characters
-                ctrl = sum(xgmii_ctrl_to_baser_mapping.get(d, BaseRCtrl.ERROR) << i*7 for i, d in enumerate(dl))
-
-                if not any(cl):
-                    # data
-                    hdr = BaseRSync.DATA
-                    data = int.from_bytes(dl, 'little')
+                    if frame_offset >= len(frame.data):
+                        ifg_cnt = max(self.ifg - (8-k), 0)
+                        frame.sim_time_end = sim_time + (clk_period // self.byte_lanes * k) - gbx_delay
+                        frame.handle_tx_complete()
+                        frame = None
+                        self.current_frame = None
                 else:
-                    # control
-                    hdr = BaseRSync.CTRL
-                    if cl[0] and dl[0] == XgmiiCtrl.START and not any(cl[1:]):
-                        # start in lane 0
-                        data = BaseRBlockType.START_0
-                        for i in range(1, 8):
-                            data |= dl[i] << i*8
-                    elif cl[4] and dl[4] == XgmiiCtrl.START and not any(cl[5:]):
-                        # start in lane 4
-                        if cl[0] and (dl[0] == XgmiiCtrl.SEQ_OS or dl[0] == XgmiiCtrl.SIG_OS) and not any(cl[1:4]):
-                            # ordered set in lane 0
-                            data = BaseRBlockType.OS_START
-                            for i in range(1, 4):
-                                data |= dl[i] << i*8
-                            if dl[0] == XgmiiCtrl.SIG_OS:
-                                # signal ordered set
-                                data |= BaseRO.SIG_OS << 32
-                        else:
-                            # other control
-                            data = BaseRBlockType.START_4 | (ctrl & 0xfffffff) << 8
+                    dl.append(XgmiiCtrl.IDLE)
+                    cl.append(1)
 
-                        for i in range(5, 8):
-                            data |= dl[i] << i*8
-                    elif cl[0] and (dl[0] == XgmiiCtrl.SEQ_OS or dl[0] == XgmiiCtrl.SIG_OS) and not any(cl[1:4]):
-                        # ordered set in lane 0
-                        if cl[4] and (dl[4] == XgmiiCtrl.SEQ_OS or dl[4] == XgmiiCtrl.SIG_OS) and not any(cl[5:8]):
-                            # ordered set in lane 4
-                            data = BaseRBlockType.OS_04
-                            for i in range(5, 8):
-                                data |= dl[i] << i*8
-                            if dl[4] == XgmiiCtrl.SIG_OS:
-                                # signal ordered set
-                                data |= BaseRO.SIG_OS << 36
+            # replace idles with ordered sets
+            if self.os is not None:
+                for k in [0, 4]:
+                    if all(cl[k:k+4]) and all(d == XgmiiCtrl.IDLE for d in dl[k:k+4]):
+                        if self.os_sig:
+                            self.log.info("TX signal ordered set: 0x%06x", self.os)
+                            dl[k] = XgmiiCtrl.SIG_OS
                         else:
-                            data = BaseRBlockType.OS_0 | (ctrl & 0xfffffff) << 40
+                            self.log.info("TX sequence ordered set: 0x%06x", self.os)
+                            dl[k] = XgmiiCtrl.SEQ_OS
+                        dl[k+1:k+4] = self.os.to_bytes(3, 'big')
+                        cl[k+1:k+4] = [0, 0, 0]
+
+            # remap control characters
+            ctrl = sum(xgmii_ctrl_to_baser_mapping.get(d, BaseRCtrl.ERROR) << i*7 for i, d in enumerate(dl))
+
+            if not any(cl):
+                # data
+                hdr = BaseRSync.DATA
+                data = int.from_bytes(dl, 'little')
+            else:
+                # control
+                hdr = BaseRSync.CTRL
+                if cl[0] and dl[0] == XgmiiCtrl.START and not any(cl[1:]):
+                    # start in lane 0
+                    data = BaseRBlockType.START_0
+                    for i in range(1, 8):
+                        data |= dl[i] << i*8
+                elif cl[4] and dl[4] == XgmiiCtrl.START and not any(cl[5:]):
+                    # start in lane 4
+                    if cl[0] and (dl[0] == XgmiiCtrl.SEQ_OS or dl[0] == XgmiiCtrl.SIG_OS) and not any(cl[1:4]):
+                        # ordered set in lane 0
+                        data = BaseRBlockType.OS_START
                         for i in range(1, 4):
                             data |= dl[i] << i*8
                         if dl[0] == XgmiiCtrl.SIG_OS:
                             # signal ordered set
                             data |= BaseRO.SIG_OS << 32
-                    elif cl[4] and (dl[4] == XgmiiCtrl.SEQ_OS or dl[4] == XgmiiCtrl.SIG_OS) and not any(cl[5:8]):
+                    else:
+                        # other control
+                        data = BaseRBlockType.START_4 | (ctrl & 0xfffffff) << 8
+
+                    for i in range(5, 8):
+                        data |= dl[i] << i*8
+                elif cl[0] and (dl[0] == XgmiiCtrl.SEQ_OS or dl[0] == XgmiiCtrl.SIG_OS) and not any(cl[1:4]):
+                    # ordered set in lane 0
+                    if cl[4] and (dl[4] == XgmiiCtrl.SEQ_OS or dl[4] == XgmiiCtrl.SIG_OS) and not any(cl[5:8]):
                         # ordered set in lane 4
-                        data = BaseRBlockType.OS_4 | (ctrl & 0xfffffff) << 8
+                        data = BaseRBlockType.OS_04
                         for i in range(5, 8):
                             data |= dl[i] << i*8
                         if dl[4] == XgmiiCtrl.SIG_OS:
                             # signal ordered set
                             data |= BaseRO.SIG_OS << 36
-                    elif cl[0] and dl[0] == XgmiiCtrl.TERM:
-                        # terminate in lane 0
-                        data = BaseRBlockType.TERM_0 | (ctrl & 0xffffffffffff80) << 8
-                    elif cl[1] and dl[1] == XgmiiCtrl.TERM and not cl[0]:
-                        # terminate in lane 1
-                        data = BaseRBlockType.TERM_1 | (ctrl & 0xffffffffffc000) << 8 | dl[0] << 8
-                    elif cl[2] and dl[2] == XgmiiCtrl.TERM and not any(cl[0:2]):
-                        # terminate in lane 2
-                        data = BaseRBlockType.TERM_2 | (ctrl & 0xffffffffe00000) << 8
-                        for i in range(2):
-                            data |= dl[i] << ((i+1)*8)
-                    elif cl[3] and dl[3] == XgmiiCtrl.TERM and not any(cl[0:3]):
-                        # terminate in lane 3
-                        data = BaseRBlockType.TERM_3 | (ctrl & 0xfffffff0000000) << 8
-                        for i in range(3):
-                            data |= dl[i] << ((i+1)*8)
-                    elif cl[4] and dl[4] == XgmiiCtrl.TERM and not any(cl[0:4]):
-                        # terminate in lane 4
-                        data = BaseRBlockType.TERM_4 | (ctrl & 0xfffff800000000) << 8
-                        for i in range(4):
-                            data |= dl[i] << ((i+1)*8)
-                    elif cl[5] and dl[5] == XgmiiCtrl.TERM and not any(cl[0:5]):
-                        # terminate in lane 5
-                        data = BaseRBlockType.TERM_5 | (ctrl & 0xfffc0000000000) << 8
-                        for i in range(5):
-                            data |= dl[i] << ((i+1)*8)
-                    elif cl[6] and dl[6] == XgmiiCtrl.TERM and not any(cl[0:6]):
-                        # terminate in lane 6
-                        data = BaseRBlockType.TERM_6 | (ctrl & 0xfe000000000000) << 8
-                        for i in range(6):
-                            data |= dl[i] << ((i+1)*8)
-                    elif cl[7] and dl[7] == XgmiiCtrl.TERM and not any(cl[0:7]):
-                        # terminate in lane 7
-                        data = BaseRBlockType.TERM_7
-                        for i in range(7):
-                            data |= dl[i] << ((i+1)*8)
                     else:
-                        # all control
-                        data = BaseRBlockType.CTRL | ctrl << 8
-            else:
-                data = BaseRBlockType.CTRL
-                hdr = BaseRSync.CTRL
-                self.active = False
-                self.idle_event.set()
+                        data = BaseRBlockType.OS_0 | (ctrl & 0xfffffff) << 40
+                    for i in range(1, 4):
+                        data |= dl[i] << i*8
+                    if dl[0] == XgmiiCtrl.SIG_OS:
+                        # signal ordered set
+                        data |= BaseRO.SIG_OS << 32
+                elif cl[4] and (dl[4] == XgmiiCtrl.SEQ_OS or dl[4] == XgmiiCtrl.SIG_OS) and not any(cl[5:8]):
+                    # ordered set in lane 4
+                    data = BaseRBlockType.OS_4 | (ctrl & 0xfffffff) << 8
+                    for i in range(5, 8):
+                        data |= dl[i] << i*8
+                    if dl[4] == XgmiiCtrl.SIG_OS:
+                        # signal ordered set
+                        data |= BaseRO.SIG_OS << 36
+                elif cl[0] and dl[0] == XgmiiCtrl.TERM:
+                    # terminate in lane 0
+                    data = BaseRBlockType.TERM_0 | (ctrl & 0xffffffffffff80) << 8
+                elif cl[1] and dl[1] == XgmiiCtrl.TERM and not cl[0]:
+                    # terminate in lane 1
+                    data = BaseRBlockType.TERM_1 | (ctrl & 0xffffffffffc000) << 8 | dl[0] << 8
+                elif cl[2] and dl[2] == XgmiiCtrl.TERM and not any(cl[0:2]):
+                    # terminate in lane 2
+                    data = BaseRBlockType.TERM_2 | (ctrl & 0xffffffffe00000) << 8
+                    for i in range(2):
+                        data |= dl[i] << ((i+1)*8)
+                elif cl[3] and dl[3] == XgmiiCtrl.TERM and not any(cl[0:3]):
+                    # terminate in lane 3
+                    data = BaseRBlockType.TERM_3 | (ctrl & 0xfffffff0000000) << 8
+                    for i in range(3):
+                        data |= dl[i] << ((i+1)*8)
+                elif cl[4] and dl[4] == XgmiiCtrl.TERM and not any(cl[0:4]):
+                    # terminate in lane 4
+                    data = BaseRBlockType.TERM_4 | (ctrl & 0xfffff800000000) << 8
+                    for i in range(4):
+                        data |= dl[i] << ((i+1)*8)
+                elif cl[5] and dl[5] == XgmiiCtrl.TERM and not any(cl[0:5]):
+                    # terminate in lane 5
+                    data = BaseRBlockType.TERM_5 | (ctrl & 0xfffc0000000000) << 8
+                    for i in range(5):
+                        data |= dl[i] << ((i+1)*8)
+                elif cl[6] and dl[6] == XgmiiCtrl.TERM and not any(cl[0:6]):
+                    # terminate in lane 6
+                    data = BaseRBlockType.TERM_6 | (ctrl & 0xfe000000000000) << 8
+                    for i in range(6):
+                        data |= dl[i] << ((i+1)*8)
+                elif cl[7] and dl[7] == XgmiiCtrl.TERM and not any(cl[0:7]):
+                    # terminate in lane 7
+                    data = BaseRBlockType.TERM_7
+                    for i in range(7):
+                        data |= dl[i] << ((i+1)*8)
+                else:
+                    # all control
+                    data = BaseRBlockType.CTRL | ctrl << 8
 
             if self.scramble:
                 # 64b/66b scrambler
@@ -537,6 +561,9 @@ class BaseRSerdesSink:
         self.queue_occupancy_bytes = 0
         self.queue_occupancy_frames = 0
 
+        self.os = None
+        self.os_sig = False
+
         self.width = len(self.data)
         self.byte_size = 8
         self.byte_lanes = self.width // self.byte_size
@@ -603,6 +630,11 @@ class BaseRSerdesSink:
             if k in self.gbx_seq_stall:
                 continue
             self.gbx_bit_cnt += in_bits
+
+    def get_os(self):
+        ret = (self.os, self.os_sig)
+        self.os = None
+        return ret
 
     def _recv(self, frame, compact=True):
         if self.queue.empty():
@@ -764,6 +796,7 @@ class BaseRSerdesSink:
 
             dl = bytearray()
             cl = []
+            os = False
             if hdr == BaseRSync.DATA:
                 # data
                 dl = db
@@ -777,11 +810,13 @@ class BaseRSerdesSink:
                     # D7 D6 D5 O4 C3 C2 C1 C0 BT
                     dl = ctrl[0:4]
                     cl = [1]*4
+                    os = True
                     if (db[4] >> 4) & 0xf == BaseRO.SEQ_OS:
                         dl.append(XgmiiCtrl.SEQ_OS)
                     elif (db[4] >> 4) & 0xf == BaseRO.SIG_OS:
                         dl.append(XgmiiCtrl.SIG_OS)
                     else:
+                        self.log.warning("Invalid O code")
                         dl.append(XgmiiCtrl.ERROR)
                     cl.append(1)
                     dl += db[5:]
@@ -796,11 +831,13 @@ class BaseRSerdesSink:
                     cl += [0]*3
                 elif db[0] == BaseRBlockType.OS_START:
                     # D7 D6 D5    O0 D3 D2 D1 BT
+                    os = True
                     if db[4] & 0xf == BaseRO.SEQ_OS:
                         dl.append(XgmiiCtrl.SEQ_OS)
                     elif db[4] & 0xf == BaseRO.SIG_OS:
                         dl.append(XgmiiCtrl.SIG_OS)
                     else:
+                        self.log.warning("Invalid O code")
                         dl.append(XgmiiCtrl.ERROR)
                     cl.append(1)
                     dl += db[1:4]
@@ -811,11 +848,13 @@ class BaseRSerdesSink:
                     cl += [0]*3
                 elif db[0] == BaseRBlockType.OS_04:
                     # D7 D6 D5 O4 O0 D3 D2 D1 BT
+                    os = True
                     if db[4] & 0xf == BaseRO.SEQ_OS:
                         dl.append(XgmiiCtrl.SEQ_OS)
                     elif db[4] & 0xf == BaseRO.SIG_OS:
                         dl.append(XgmiiCtrl.SIG_OS)
                     else:
+                        self.log.warning("Invalid O code")
                         dl.append(XgmiiCtrl.ERROR)
                     cl.append(1)
                     dl += db[1:4]
@@ -825,6 +864,7 @@ class BaseRSerdesSink:
                     elif (db[4] >> 4) & 0xf == BaseRO.SIG_OS:
                         dl.append(XgmiiCtrl.SIG_OS)
                     else:
+                        self.log.warning("Invalid O code")
                         dl.append(XgmiiCtrl.ERROR)
                     cl.append(1)
                     dl += db[5:]
@@ -837,11 +877,13 @@ class BaseRSerdesSink:
                     cl += [0]*7
                 elif db[0] == BaseRBlockType.OS_0:
                     # C7 C6 C5 C4 O0 D3 D2 D1 BT
+                    os = True
                     if db[4] & 0xf == BaseRO.SEQ_OS:
                         dl.append(XgmiiCtrl.SEQ_OS)
                     elif db[4] & 0xf == BaseRO.SIG_OS:
-                        dl.append(XgmiiCtrl.SEQ_OS)
+                        dl.append(XgmiiCtrl.SIG_OS)
                     else:
+                        self.log.warning("Invalid O code")
                         dl.append(XgmiiCtrl.ERROR)
                     cl.append(1)
                     dl += db[1:4]
@@ -876,6 +918,18 @@ class BaseRSerdesSink:
                 self.log.warning("Invalid sync header")
                 dl = [XgmiiCtrl.ERROR]*8
                 cl = [1]*8
+
+            # extract ordered sets
+            if os:
+                for k in [0, 4]:
+                    if cl[k] and dl[k] == XgmiiCtrl.SEQ_OS:
+                        self.os = int.from_bytes(db[k+1:k+4], 'big')
+                        self.os_sig = False
+                        self.log.info("RX sequence ordered set: 0x%06x", self.os)
+                    elif cl[k] and dl[k] == XgmiiCtrl.SIG_OS:
+                        self.os = int.from_bytes(db[k+1:k+4], 'big')
+                        self.os_sig = True
+                        self.log.info("RX signal ordered set: 0x%06x", self.os)
 
             for k in range(8):
                 d_val = dl[k]
