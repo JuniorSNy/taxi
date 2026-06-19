@@ -45,6 +45,14 @@ module taxi_xgmii_baser_enc #
     output wire logic [GBX_CNT-1:0]  tx_gbx_sync_out,
 
     /*
+     * Ordered sets
+     */
+    input  wire logic [23:0]         tx_os = '0,
+    input  wire logic                tx_os_sig = 1'b0,
+    input  wire logic                tx_os_valid = 1'b0,
+    output wire logic                tx_os_ready,
+
+    /*
      * Status
      */
     output wire logic                tx_bad_block
@@ -136,6 +144,8 @@ logic [HDR_W-1:0] encoded_tx_hdr_reg = '0, encoded_tx_hdr_next;
 logic encoded_tx_hdr_valid_reg = 1'b0, encoded_tx_hdr_valid_next;
 logic [GBX_CNT-1:0] tx_gbx_sync_reg = '0, tx_gbx_sync_next;
 
+logic tx_os_ready_reg = 1'b0, tx_os_ready_next;
+
 logic tx_bad_block_reg = 1'b0, tx_bad_block_next;
 
 assign encoded_tx_data = encoded_tx_data_reg[DATA_W-1:0];
@@ -143,6 +153,8 @@ assign encoded_tx_data_valid = GBX_IF_EN ? encoded_tx_data_valid_reg[0] : 1'b1;
 assign encoded_tx_hdr = encoded_tx_hdr_reg;
 assign encoded_tx_hdr_valid = USE_HDR_VLD ? encoded_tx_hdr_valid_reg : 1'b1;
 assign tx_gbx_sync_out = GBX_IF_EN ? tx_gbx_sync_reg : '0;
+
+assign tx_os_ready = tx_os_ready_reg;
 
 assign tx_bad_block = tx_bad_block_reg;
 
@@ -186,6 +198,8 @@ always_comb begin
     encoded_tx_hdr_next = SYNC_CTRL;
     encoded_tx_hdr_valid_next = '0;
     tx_gbx_sync_next = '0;
+
+    tx_os_ready_next = 1'b0;
 
     tx_bad_block_next = 1'b0;
 
@@ -321,7 +335,21 @@ always_comb begin
             tx_bad_block_next = 1'b0;
         end else if (xgmii_txc_int == 8'hff) begin
             // all control
-            encoded_tx_data_next = {encoded_ctrl, BLOCK_TYPE_CTRL};
+            if (tx_os_valid && xgmii_txd_int[7:0] == XGMII_IDLE) begin
+                // assume all idles, replace with ordered sets
+                encoded_tx_data_next[7:0] = BLOCK_TYPE_OS_04;
+                encoded_tx_data_next[15:8] = tx_os[23:16];
+                encoded_tx_data_next[23:16] = tx_os[15:8];
+                encoded_tx_data_next[31:24] = tx_os[7:0];
+                encoded_tx_data_next[35:32] = tx_os_sig ? O_SIG_OS : O_SEQ_OS;
+                encoded_tx_data_next[39:36] = tx_os_sig ? O_SIG_OS : O_SEQ_OS;
+                encoded_tx_data_next[47:40] = tx_os[23:16];
+                encoded_tx_data_next[55:48] = tx_os[15:8];
+                encoded_tx_data_next[63:56] = tx_os[7:0];
+                tx_os_ready_next = 1'b1;
+            end else begin
+                encoded_tx_data_next = {encoded_ctrl, BLOCK_TYPE_CTRL};
+            end
             tx_bad_block_next = encode_err != 0;
         end else begin
             // no corresponding block format
@@ -346,6 +374,8 @@ always_ff @(posedge clk) begin
     encoded_tx_hdr_reg <= encoded_tx_hdr_next;
     encoded_tx_hdr_valid_reg <= encoded_tx_hdr_valid_next;
     tx_gbx_sync_reg <= tx_gbx_sync_next;
+
+    tx_os_ready_reg <= tx_os_ready_next;
 
     tx_bad_block_reg <= tx_bad_block_next;
 end

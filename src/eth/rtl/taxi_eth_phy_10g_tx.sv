@@ -98,6 +98,14 @@ xgmii_baser_enc_inst (
     .tx_gbx_sync_out(tx_gbx_sync_int),
 
     /*
+     * Ordered sets
+     */
+    .tx_os('0),
+    .tx_os_sig(1'b0),
+    .tx_os_valid(1'b0),
+    .tx_os_ready(),
+
+    /*
      * Status
      */
     .tx_bad_block(tx_bad_block)

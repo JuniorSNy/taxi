@@ -147,6 +147,13 @@ xgmii_baser_dec_inst (
     .xgmii_rx_valid(xgmii_rx_valid),
 
     /*
+     * Ordered sets
+     */
+    .rx_os(),
+    .rx_os_sig(),
+    .rx_os_valid(),
+
+    /*
      * Status
      */
     .rx_bad_block(rx_bad_block),

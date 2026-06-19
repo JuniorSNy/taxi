@@ -42,6 +42,13 @@ module taxi_xgmii_baser_dec #
     output wire logic              xgmii_rx_valid,
 
     /*
+     * Ordered sets
+     */
+    output wire logic [23:0]       rx_os = '0,
+    output wire logic              rx_os_sig = 1'b0,
+    output wire logic              rx_os_valid = 1'b0,
+
+    /*
      * Status
      */
     output wire logic              rx_bad_block,
@@ -130,6 +137,10 @@ logic [DATA_W_INT-1:0] xgmii_rxd_reg = '0, xgmii_rxd_next;
 logic [CTRL_W_INT-1:0] xgmii_rxc_reg = '0, xgmii_rxc_next;
 logic [SEG_CNT-1:0] xgmii_rx_valid_reg = '0, xgmii_rx_valid_next;
 
+logic [23:0] rx_os_reg = '0, rx_os_next;
+logic rx_os_sig_reg = 1'b0, rx_os_sig_next;
+logic rx_os_valid_reg = 1'b0, rx_os_valid_next;
+
 logic rx_bad_block_reg = 1'b0, rx_bad_block_next;
 logic rx_sequence_error_reg = 1'b0, rx_sequence_error_next;
 logic frame_reg = 1'b0, frame_next;
@@ -137,6 +148,10 @@ logic frame_reg = 1'b0, frame_next;
 assign xgmii_rxd = xgmii_rxd_reg[DATA_W-1:0];
 assign xgmii_rxc = xgmii_rxc_reg[CTRL_W-1:0];
 assign xgmii_rx_valid = GBX_IF_EN ? xgmii_rx_valid_reg[0] : 1'b1;
+
+assign rx_os = rx_os_reg;
+assign rx_os_sig = rx_os_sig_reg;
+assign rx_os_valid = rx_os_valid_reg;
 
 assign rx_bad_block = rx_bad_block_reg;
 assign rx_sequence_error = rx_sequence_error_reg;
@@ -177,6 +192,11 @@ always_comb begin
     xgmii_rxd_next = {CTRL_W_INT{XGMII_ERROR}};
     xgmii_rxc_next = '1;
     xgmii_rx_valid_next = '0;
+
+    rx_os_next = '0;
+    rx_os_sig_next = 1'b0;
+    rx_os_valid_next = 1'b0;
+
     rx_bad_block_next = 1'b0;
     rx_sequence_error_next = 1'b0;
     frame_next = frame_reg;
@@ -263,9 +283,19 @@ always_comb begin
                 xgmii_rxc_next[3:0] = 4'hf;
                 xgmii_rxd_next[63:40] = encoded_rx_data_int[63:40];
                 xgmii_rxc_next[7:4] = 4'h1;
+                rx_os_next[7:0] = encoded_rx_data_int[63:56];
+                rx_os_next[15:8] = encoded_rx_data_int[55:48];
+                rx_os_next[23:16] = encoded_rx_data_int[47:40];
                 if (encoded_rx_data_int[39:36] == O_SEQ_OS) begin
                     xgmii_rxd_next[39:32] = XGMII_SEQ_OS;
                     rx_bad_block_next = decode_err[3:0] != 0;
+                    rx_os_sig_next = 1'b0;
+                    rx_os_valid_next = 1'b1;
+                end else if (encoded_rx_data_int[39:36] == O_SIG_OS) begin
+                    xgmii_rxd_next[39:32] = XGMII_SIG_OS;
+                    rx_bad_block_next = decode_err[3:0] != 0;
+                    rx_os_sig_next = 1'b1;
+                    rx_os_valid_next = 1'b1;
                 end else begin
                     xgmii_rxd_next[39:32] = XGMII_ERROR;
                     rx_bad_block_next = 1'b1;
@@ -283,9 +313,19 @@ always_comb begin
                 // D7 D6 D5    O0 D3 D2 D1 BT
                 xgmii_rxd_next[31:8] = encoded_rx_data_int[31:8];
                 xgmii_rxc_next[3:0] = 4'h1;
+                rx_os_next[7:0] = encoded_rx_data_int[31:24];
+                rx_os_next[15:8] = encoded_rx_data_int[23:16];
+                rx_os_next[23:16] = encoded_rx_data_int[15:8];
                 if (encoded_rx_data_int[35:32] == O_SEQ_OS) begin
                     xgmii_rxd_next[7:0] = XGMII_SEQ_OS;
                     rx_bad_block_next = 1'b0;
+                    rx_os_sig_next = 1'b0;
+                    rx_os_valid_next = 1'b1;
+                end else if (encoded_rx_data_int[35:32] == O_SIG_OS) begin
+                    xgmii_rxd_next[7:0] = XGMII_SIG_OS;
+                    rx_bad_block_next = 1'b0;
+                    rx_os_sig_next = 1'b1;
+                    rx_os_valid_next = 1'b1;
                 end else begin
                     xgmii_rxd_next[7:0] = XGMII_ERROR;
                     rx_bad_block_next = 1'b1;
@@ -302,14 +342,25 @@ always_comb begin
                 xgmii_rxc_next[3:0] = 4'h1;
                 if (encoded_rx_data_int[35:32] == O_SEQ_OS) begin
                     xgmii_rxd_next[7:0] = XGMII_SEQ_OS;
+                end else if (encoded_rx_data_int[35:32] == O_SIG_OS) begin
+                    xgmii_rxd_next[7:0] = XGMII_SIG_OS;
                 end else begin
                     xgmii_rxd_next[7:0] = XGMII_ERROR;
                     rx_bad_block_next = 1'b1;
                 end
                 xgmii_rxd_next[63:40] = encoded_rx_data_int[63:40];
                 xgmii_rxc_next[7:4] = 4'h1;
+                rx_os_next[7:0] = encoded_rx_data_int[63:56];
+                rx_os_next[15:8] = encoded_rx_data_int[55:48];
+                rx_os_next[23:16] = encoded_rx_data_int[47:40];
                 if (encoded_rx_data_int[39:36] == O_SEQ_OS) begin
                     xgmii_rxd_next[39:32] = XGMII_SEQ_OS;
+                    rx_os_sig_next = 1'b0;
+                    rx_os_valid_next = 1'b1;
+                end else if (encoded_rx_data_int[39:36] == O_SIG_OS) begin
+                    xgmii_rxd_next[39:32] = XGMII_SIG_OS;
+                    rx_os_sig_next = 1'b1;
+                    rx_os_valid_next = 1'b1;
                 end else begin
                     xgmii_rxd_next[39:32] = XGMII_ERROR;
                     rx_bad_block_next = 1'b1;
@@ -327,9 +378,19 @@ always_comb begin
                 // C7 C6 C5 C4 O0 D3 D2 D1 BT
                 xgmii_rxd_next[31:8] = encoded_rx_data_int[31:8];
                 xgmii_rxc_next[3:0] = 4'h1;
+                rx_os_next[7:0] = encoded_rx_data_int[31:24];
+                rx_os_next[15:8] = encoded_rx_data_int[23:16];
+                rx_os_next[23:16] = encoded_rx_data_int[15:8];
                 if (encoded_rx_data_int[35:32] == O_SEQ_OS) begin
                     xgmii_rxd_next[7:0] = XGMII_SEQ_OS;
                     rx_bad_block_next = decode_err[7:4] != 0;
+                    rx_os_sig_next = 1'b0;
+                    rx_os_valid_next = 1'b1;
+                end else if (encoded_rx_data_int[35:32] == O_SIG_OS) begin
+                    xgmii_rxd_next[7:0] = XGMII_SIG_OS;
+                    rx_bad_block_next = decode_err[7:4] != 0;
+                    rx_os_sig_next = 1'b1;
+                    rx_os_valid_next = 1'b1;
                 end else begin
                     xgmii_rxd_next[7:0] = XGMII_ERROR;
                     rx_bad_block_next = 1'b1;
@@ -453,12 +514,17 @@ always_ff @(posedge clk) begin
     xgmii_rxc_reg <= xgmii_rxc_next;
     xgmii_rx_valid_reg <= xgmii_rx_valid_next;
 
+    rx_os_reg <= rx_os_next;
+    rx_os_sig_reg <= rx_os_sig_next;
+    rx_os_valid_reg <= rx_os_valid_next;
+
     rx_bad_block_reg <= rx_bad_block_next;
     rx_sequence_error_reg <= rx_sequence_error_next;
     frame_reg <= frame_next;
 
     if (rst) begin
         xgmii_rx_valid_reg <= '0;
+        rx_os_valid_reg <= 1'b0;
         frame_reg <= 1'b0;
     end
 end
