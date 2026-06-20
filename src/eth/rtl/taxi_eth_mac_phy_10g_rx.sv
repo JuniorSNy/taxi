@@ -170,6 +170,13 @@ if (DATA_W == 64) begin
         .m_axis_rx(m_axis_rx),
 
         /*
+         * Ordered sets
+         */
+        .rx_os(),
+        .rx_os_sig(),
+        .rx_os_valid(),
+
+        /*
          * PTP
          */
         .ptp_ts(ptp_ts),
@@ -226,6 +233,13 @@ end else begin
          * Receive interface (AXI stream)
          */
         .m_axis_rx(m_axis_rx),
+
+        /*
+         * Ordered sets
+         */
+        .rx_os(),
+        .rx_os_sig(),
+        .rx_os_valid(),
 
         /*
          * PTP

@@ -168,6 +168,14 @@ if (DATA_W == 64) begin
         .tx_gbx_sync(tx_gbx_sync),
 
         /*
+         * Ordered sets
+         */
+        .tx_os('0),
+        .tx_os_sig(1'b0),
+        .tx_os_valid(1'b0),
+        .tx_os_ready(),
+
+        /*
          * PTP
          */
         .ptp_ts(ptp_ts),
@@ -228,6 +236,14 @@ end else begin
         .tx_gbx_req_sync(tx_gbx_req_sync),
         .tx_gbx_req_stall(tx_gbx_req_stall),
         .tx_gbx_sync(tx_gbx_sync),
+
+        /*
+         * Ordered sets
+         */
+        .tx_os('0),
+        .tx_os_sig(1'b0),
+        .tx_os_valid(1'b0),
+        .tx_os_ready(),
 
         /*
          * PTP

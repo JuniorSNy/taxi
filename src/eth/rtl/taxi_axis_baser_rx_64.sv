@@ -42,6 +42,13 @@ module taxi_axis_baser_rx_64 #
     taxi_axis_if.src                  m_axis_rx,
 
     /*
+     * Ordered sets
+     */
+    output wire logic [23:0]          rx_os = '0,
+    output wire logic                 rx_os_sig = 1'b0,
+    output wire logic                 rx_os_valid = 1'b0,
+
+    /*
      * PTP
      */
     input  wire logic [PTP_TS_W-1:0]  ptp_ts,
@@ -183,6 +190,10 @@ logic m_axis_rx_tvalid_reg = 1'b0, m_axis_rx_tvalid_next;
 logic m_axis_rx_tlast_reg = 1'b0, m_axis_rx_tlast_next;
 logic m_axis_rx_tuser_reg = 1'b0, m_axis_rx_tuser_next;
 
+logic [23:0] rx_os_reg = '0;
+logic rx_os_sig_reg = 1'b0;
+logic rx_os_valid_reg = 1'b0;
+
 logic [1:0] start_packet_reg = 2'b00;
 logic frame_reg = 1'b0;
 
@@ -237,6 +248,10 @@ assign m_axis_rx.tuser[0] = m_axis_rx_tuser_reg;
 if (PTP_TS_EN) begin
     assign m_axis_rx.tuser[1 +: PTP_TS_W] = ptp_ts_out_reg;
 end
+
+assign rx_os = rx_os_reg;
+assign rx_os_sig = rx_os_sig_reg;
+assign rx_os_valid = rx_os_valid_reg;
 
 assign rx_start_packet = start_packet_reg;
 
@@ -561,6 +576,8 @@ always_ff @(posedge clk) begin
     m_axis_rx_tlast_reg <= m_axis_rx_tlast_next;
     m_axis_rx_tuser_reg <= m_axis_rx_tuser_next;
 
+    rx_os_valid_reg <= 1'b0;
+
     ptp_ts_out_reg <= ptp_ts_out_next;
 
     start_packet_reg <= 2'b00;
@@ -719,6 +736,25 @@ always_ff @(posedge clk) begin
             crc_state_reg <= ~32'h6dd90a9d;
         end
 
+        // ordered sets
+        if (encoded_rx_data[7:4] == BLOCK_TYPE_OS_4[7:4] || encoded_rx_data[7:4] == BLOCK_TYPE_OS_04[7:4]) begin
+            rx_os_reg[7:0] <= encoded_rx_data[63:56];
+            rx_os_reg[15:8] <= encoded_rx_data[55:48];
+            rx_os_reg[23:16] <= encoded_rx_data[47:40];
+            rx_os_sig_reg <= encoded_rx_data[39:36] == O_SIG_OS;
+            if ((encoded_rx_data[7:0] == BLOCK_TYPE_OS_4 || encoded_rx_data[7:0] == BLOCK_TYPE_OS_04) || (encoded_rx_data[39:36] == O_SEQ_OS || encoded_rx_data[39:36] == O_SIG_OS)) begin
+                rx_os_valid_reg <= 1'b1;
+            end
+        end else if (encoded_rx_data[7:4] == BLOCK_TYPE_OS_0[7:4] || encoded_rx_data[7:4] == BLOCK_TYPE_OS_START[7:4]) begin
+            rx_os_reg[7:0] <= encoded_rx_data[31:24];
+            rx_os_reg[15:8] <= encoded_rx_data[23:16];
+            rx_os_reg[23:16] <= encoded_rx_data[15:8];
+            rx_os_sig_reg <= encoded_rx_data[35:32] == O_SIG_OS;
+            if ((encoded_rx_data[7:0] == BLOCK_TYPE_OS_0 || encoded_rx_data[7:0] == BLOCK_TYPE_OS_START) || (encoded_rx_data[35:32] == O_SEQ_OS || encoded_rx_data[35:32] == O_SIG_OS)) begin
+                rx_os_valid_reg <= 1'b1;
+            end
+        end
+
         // check for framing errors
         framing_error_reg <= 1'b0;
         framing_error_d0_reg <= framing_error_reg;
@@ -853,6 +889,8 @@ always_ff @(posedge clk) begin
         state_reg <= STATE_IDLE;
 
         m_axis_rx_tvalid_reg <= 1'b0;
+
+        rx_os_valid_reg <= 1'b0;
 
         start_packet_reg <= 2'b00;
         frame_reg <= 1'b0;

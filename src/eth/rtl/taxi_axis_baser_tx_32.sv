@@ -48,6 +48,14 @@ module taxi_axis_baser_tx_32 #
     output wire logic [GBX_CNT-1:0]   tx_gbx_sync,
 
     /*
+     * Ordered sets
+     */
+    input  wire logic [23:0]          tx_os = '0,
+    input  wire logic                 tx_os_sig = 1'b0,
+    input  wire logic                 tx_os_valid = 1'b0,
+    output wire logic                 tx_os_ready,
+
+    /*
      * PTP
      */
     input  wire logic [PTP_TS_W-1:0]  ptp_ts,
@@ -198,6 +206,8 @@ logic s_axis_tx_tready_reg = 1'b0, s_axis_tx_tready_next;
 logic [PTP_TS_W-1:0] m_axis_tx_cpl_ts_reg = '0, m_axis_tx_cpl_ts_next;
 logic [TX_TAG_W-1:0] m_axis_tx_cpl_tag_reg = '0, m_axis_tx_cpl_tag_next;
 logic m_axis_tx_cpl_valid_reg = 1'b0, m_axis_tx_cpl_valid_next;
+
+logic tx_os_ready_reg = 1'b0;
 
 logic [DATA_W-1:0] encoded_tx_data_reg = {24'd0, BLOCK_TYPE_CTRL};
 logic encoded_tx_data_valid_reg = 1'b0;
@@ -679,6 +689,8 @@ always_ff @(posedge clk) begin
     m_axis_tx_cpl_tag_reg <= m_axis_tx_cpl_tag_next;
     m_axis_tx_cpl_valid_reg <= m_axis_tx_cpl_valid_next;
 
+    tx_os_ready_reg <= 1'b0;
+
     start_packet_reg <= start_packet_next;
 
     stat_tx_byte_reg <= stat_tx_byte_next;
@@ -705,7 +717,14 @@ always_ff @(posedge clk) begin
         if (phase_reg == 0) begin
             case ({output_type_reg, output_type_next})
                 {OUTPUT_TYPE_IDLE, OUTPUT_TYPE_IDLE}: begin
-                    encoded_tx_data_reg <= {24'd0, BLOCK_TYPE_CTRL};
+                    if (tx_os_valid) begin
+                        encoded_tx_data_reg[7:0] <= BLOCK_TYPE_OS_04;
+                        encoded_tx_data_reg[15:8] <= tx_os[23:16];
+                        encoded_tx_data_reg[23:16] <= tx_os[15:8];
+                        encoded_tx_data_reg[31:24] <= tx_os[7:0];
+                    end else begin
+                        encoded_tx_data_reg <= {24'd0, BLOCK_TYPE_CTRL};
+                    end
                     encoded_tx_hdr_reg <= SYNC_CTRL;
                 end
                 {OUTPUT_TYPE_ERROR, OUTPUT_TYPE_ERROR}: begin
@@ -764,7 +783,16 @@ always_ff @(posedge clk) begin
         end else begin
             case (output_type_reg)
                 OUTPUT_TYPE_IDLE: begin
-                    encoded_tx_data_reg <= 32'd0;
+                    if (tx_os_valid) begin
+                        encoded_tx_data_reg[3:0] <= tx_os_sig ? O_SIG_OS : O_SEQ_OS;
+                        encoded_tx_data_reg[7:4] <= tx_os_sig ? O_SIG_OS : O_SEQ_OS;
+                        encoded_tx_data_reg[15:8] <= tx_os[23:16];
+                        encoded_tx_data_reg[23:16] <= tx_os[15:8];
+                        encoded_tx_data_reg[31:24] <= tx_os[7:0];
+                        tx_os_ready_reg <= 1'b1;
+                    end else begin
+                        encoded_tx_data_reg <= 32'd0;
+                    end
                 end
                 OUTPUT_TYPE_ERROR: begin
                     encoded_tx_data_reg <= 32'h3c78f1e3; // CTRL_ERROR
@@ -815,6 +843,8 @@ always_ff @(posedge clk) begin
         s_axis_tx_tready_reg <= 1'b0;
 
         m_axis_tx_cpl_valid_reg <= 1'b0;
+
+        tx_os_ready_reg <= 1'b0;
 
         encoded_tx_data_reg <= {24'd0, BLOCK_TYPE_CTRL};
         encoded_tx_data_valid_reg <= 1'b0;

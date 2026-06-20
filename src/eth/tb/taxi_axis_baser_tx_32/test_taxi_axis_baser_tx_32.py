@@ -68,6 +68,10 @@ class TB:
         self.ptp_clock = PtpClockSimTime(ts_tod=dut.ptp_ts, clock=dut.clk)
         self.tx_cpl_sink = AxiStreamSink(AxiStreamBus.from_entity(dut.m_axis_tx_cpl), dut.clk, dut.rst)
 
+        dut.tx_os.setimmediatevalue(0)
+        dut.tx_os_sig.setimmediatevalue(0)
+        dut.tx_os_valid.setimmediatevalue(0)
+
         dut.cfg_tx_max_pkt_len.setimmediatevalue(0)
         dut.cfg_tx_ifg.setimmediatevalue(0)
         dut.cfg_tx_enable.setimmediatevalue(0)
@@ -379,6 +383,34 @@ async def run_test_oversize(dut, gbx_cfg=None, ifg=12):
         await RisingEdge(dut.clk)
 
 
+async def run_test_os(dut, gbx_cfg=None):
+
+    tb = TB(dut, gbx_cfg)
+
+    await tb.reset()
+
+    for sig in [False, True]:
+        for k in range(24):
+            os = 1 << k
+
+            dut.tx_os.value = os
+            dut.tx_os_sig.value = sig
+            dut.tx_os_valid.value = 1
+
+            for k in range(20):
+                await RisingEdge(dut.clk)
+
+            assert tb.sink.get_os() == (os, sig)
+
+            dut.tx_os_valid.value = 0
+
+            for k in range(20):
+                await RisingEdge(dut.clk)
+
+    for k in range(10):
+        await RisingEdge(dut.clk)
+
+
 def size_list():
     return list(range(16, 128)) + [512, 1514, 9214] + [60]*10 + [i for i in range(64, 73) for k in range(8)]
 
@@ -416,6 +448,10 @@ if getattr(cocotb, 'top', None) is not None:
         factory.add_option("ifg", [12])
         factory.add_option("gbx_cfg", gbx_cfgs)
         factory.generate_tests()
+
+    factory = TestFactory(run_test_os)
+    factory.add_option("gbx_cfg", gbx_cfgs)
+    factory.generate_tests()
 
 
 # cocotb-test
